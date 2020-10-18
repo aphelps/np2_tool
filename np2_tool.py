@@ -21,6 +21,8 @@ LIGHT_YEAR_SCALE = 8
 
 
 def handle_args():
+    global game_id
+
     parser = argparse.ArgumentParser()
 
     parser.add_argument("-l", "--login", help="Login ID")
@@ -30,16 +32,25 @@ def handle_args():
 
     parser.add_argument("-v", "--verbose", action="store_true")
 
+    parser.add_argument("-E", "--upgrade_economy", action="store_true")
+    parser.add_argument("-I", "--upgrade_industry", action="store_true")
+    parser.add_argument("-S", "--upgrade_science", action="store_true")
+    parser.add_argument("--execute", action="store_true")
+
     options = parser.parse_args()
 
     if (not os.path.isfile(options.credentials)) and (options.login is None or options.password is None):
         print("Must provide cookes file or login/password")
         sys.exit(1)
 
+    game_id = options.gameid
+
     return options
 
 
 def load_cookies(login, password, credentials):
+    global cookies
+
     cookies = None
     if login:
         print("Logging in with email/password")
@@ -62,12 +73,14 @@ def load_cookies(login, password, credentials):
     return cookies
 
 
-def get_universe(cookies, game_id):
+def get_universe():
+    global universe
+
     response = requests.post('https://np.ironhelmet.com/trequest/order',
                              data={'type':'order',
                                    'order':'full_universe_report',
                                    'version':'',
-                                   'game_number':'5380395345117184'},
+                                   'game_number':game_id},
                              cookies=cookies)
     # print("Universe: %s" % json.dumps(universe))
 
@@ -86,13 +99,6 @@ def get_universe(cookies, game_id):
     return universe
 
 
-def player_stars(universe, player_id):
-    stars = []
-    for id, star in universe['report']['stars'].items():
-        if star['puid'] == player_id:
-            stars.append(star)
-    return sorted(stars, key = lambda i: i['n'])
-
 
 # Star format:
 #     {
@@ -104,82 +110,144 @@ def player_stars(universe, player_id):
 #         u's': 2,             # Science
 #         u'r': 40,            # Resources
 #         u'exp': 0,
-#         u'v': u'1',
+#         u'v': u'1',          # Visible
 #         u'y': u'5.04934006', # y location
 #         u'x': u'0.69888656', # x location
 #         u'ga': 0,
 #         u'st': 290           # Ships
 #     }
+class Star(object):
+    ECONOMY = 'economy'
+    INDUSTRY = 'industry'
+    SCIENCE = 'science'
 
-def star_upgrade_costs(star):
-    e = star['e'] + 1
-    i = star['i'] + 1
-    s = star['s'] + 1
-    return {
-        'economy': math.floor((10.0 * e * e) / (star['r'] / 100.0)),
-        'industry': math.floor((15.0 * i * i) / (star['r'] / 100.0)),
-        'science': math.floor((20.0 * s * s) / (star['r'] / 100.0)),
-    }
+    def __init__(self, star_info):
+        self.visible = int(star_info['v'])
+        self.name = star_info['n']
+        self.id = int(star_info['uid'])
+        self.player_id = int(star_info['puid'])
+        self.loc_x = float(star_info['x'])
+        self.loc_y = float(star_info['y'])
+
+        if self.visible:
+            self.ships = int(star_info['st'])
+            self.economy = int(star_info['e'])
+            self.industry = int(star_info['i'])
+            self.science = int(star_info['s'])
+            self.resources = int(star_info['r'])
+
+            e = self.economy + 1
+            i = self.industry + 1
+            s = self.science + 1
+            self.costs = {
+                Star.ECONOMY: math.floor(
+                    (10.0 * e * e) / (self.resources / 100.0)),
+                Star.INDUSTRY: math.floor(
+                    (15.0 * i * i) / (self.resources / 100.0)),
+                Star.SCIENCE: math.floor(
+                    (20.0 * s * s) / (self.resources / 100.0)),
+            }
+        else:
+            self.ships = None
+
+    def distance_to(self, star):
+        distance = math.sqrt(
+            (self.loc_x - star.loc_x) ** 2 +
+            (self.loc_y - star.loc_y) ** 2)
+        return {
+            'distance': distance * LIGHT_YEAR_SCALE,
+            'time': int(math.ceil(distance * LIGHT_YEAR_SCALE * LIGHT_YEAR_TIME))
+        }
+
+    def upgrade(self, resource):
+        amount = self.costs[resource]
+        data = {'type': 'batched_orders',
+                'order': 'upgrade_%s,%d,%d' % (resource, self.id, amount),
+                'version': '',
+                'game_number': '%d' % game_id}
+        print("Star.upgrade(): command: %s" % data)
+
+        result = requests.post(
+            'https://np.ironhelmet.com/prequest/batched_orders',
+            data=data,
+            cookies=cookies)
+        print('Star.upgrade(): status=%d text=%s' % (
+        result.status_code, result.text))
 
 
-def star_by_name(stars, name):
-    return next(star for star in stars if star["n"] == name)
+class Stars(object):
 
+    def __init__(self, stars):
+        self.stars = stars
 
-def star_by_id(stars, id):
-    return next(star for star in stars if star["uid"] == id)
+    @staticmethod
+    def from_universe(universe):
+        """Return an array of stars from the universe"""
+        stars = []
+        for star_id, star in universe['report']['stars'].items():
+            stars.append(Star(star))
+        return Stars(sorted(stars, key=lambda i: i.id))
 
+    def stars_for_player(self, stars, player_id):
+        return Stars([star for star in self.stars if star.player_id == player_id])
 
-def star_upgrades(stars):
-    for star in stars:
-        upgrades = star_upgrade_costs(star)
-        print("%s[%s]: e:%d i:%d s:%d" % (star['n'], star['uid'], upgrades["economy"], upgrades["industry"], upgrades["science"]))
+    def print_upgrades(self):
+        print("Upgrade Costs:")
+        for star in sorted(self.stars, key=lambda i: i.name):
+            print("%20s: id:%3d e:%5d i:%5d s:%5d" % (
+                star.name, star.id,
+                star.costs[Star.ECONOMY],
+                star.costs[Star.INDUSTRY],
+                star.costs[Star.SCIENCE]))
 
+    def by_name(self, name):
+        return next(star for star in self.stars if star.name == name)
 
-def star_distance(star1, star2):
-    distance = math.sqrt(
-        (float(star1['x']) - float(star2['x']))**2 +
-        (float(star1['y']) - float(star2['y']))**2)
-    return {
-        'distance': distance * LIGHT_YEAR_SCALE,
-        'time': math.ceil(distance * LIGHT_YEAR_SCALE * LIGHT_YEAR_TIME)
-    }
+    def by_id(self, id):
+        return next(star for star in self.stars if star.id == id)
 
+    def upgrade_cheapest(self, resource, execute=False):
+        star = sorted(self.stars, key=lambda i: i.costs[resource])[0]
+        print("Cheapest %s: %s - %d" % (resource, star.name, star.costs[resource]))
 
-def star_upgrade(cookies, game_id, star, type):
-    id = star['uid']
-    amount = star_upgrade_costs(star)['industry']
-    data = {'type': 'batched_orders',
-            'order': 'upgrade_%s,%d,%d' % (type, id, amount),
-            'version': '',
-            'game_number': '%d' % game_id}
-    print("TEST: %s" % data)
-
-    result = requests.post('https://np.ironhelmet.com/prequest/batched_orders',
-                           data=data,
-                           cookies=cookies)
-    print('test_upgrade(): status=%d text=%s' % (result.status_code, result.text))
+        if execute:
+            star.upgrade(resource)
 
 
 def main():
+
     options = handle_args()
 
-    cookies = load_cookies(options.login, options.password, options.credentials)
-    universe = get_universe(cookies, options.gameid)
+    load_cookies(options.login, options.password, options.credentials)
+    get_universe()
 
     player_id = universe['report']['player_uid']
     player_name = universe['report']['players'][str(player_id)]['alias']
     print("Player ID: %d" % player_id)
     print("Cash: %d" % universe['report']['players'][str(player_id)]['cash'])
 
-    stars = player_stars(universe, player_id)
-    print("Player %s: %d stars" % (player_name, len(stars)))
+    stars = Stars.from_universe(universe)
+    player_stars = stars.stars_for_player(stars, player_id)
 
-    star_upgrades(stars)
+    print("Player %s: %d stars" % (player_name, len(player_stars.stars)))
 
-    # test_upgrade(cookies, options.gameid, star_by_name(stars, "Kochab"), "industry")
+    player_stars.print_upgrades()
 
-    print('distance: %s' % star_distance(star_by_name(stars, "Alnilam"), star_by_name(stars, "Septen")))
+    print('distance: %s' % stars.by_name("Alnilam").distance_to(stars.by_name("Septen")))
+
+    if options.upgrade_economy:
+        player_stars.upgrade_cheapest(Star.ECONOMY, options.execute)
+    if options.upgrade_industry:
+        player_stars.upgrade_cheapest(Star.INDUSTRY, options.execute)
+    if options.upgrade_science:
+        player_stars.upgrade_cheapest(Star.SCIENCE, options.execute)
+
+
+def console_init():
+    load_cookies(None, None, "creds.np")
+    get_universe(cookies, game_id)
+    return cookies, universe
+
 
 if __name__ == '__main__':
     main()
