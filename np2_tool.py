@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+from enum import Enum
 import json
 import math
 import os
@@ -19,9 +20,12 @@ LIGHT_YEAR_TIME = 3
 # docs say 1/16, but seem to be wrong
 LIGHT_YEAR_SCALE = 8
 
+UNIVERSE_FILE = "universe.json"
+PLAYERS_FILE = "players.json"
+
 
 def handle_args():
-    global game_id
+    global options
 
     parser = argparse.ArgumentParser()
 
@@ -31,6 +35,8 @@ def handle_args():
     parser.add_argument("-g", "--gameid", type=int, default=5380395345117184, help="Game ID")
 
     parser.add_argument("-v", "--verbose", action="store_true")
+
+    parser.add_argument("-U", "--universe", action="store_true", help="Attempt to load universe.json before querying for universe")
 
     parser.add_argument("-E", "--upgrade_economy", action="store_true")
     parser.add_argument("-I", "--upgrade_industry", action="store_true")
@@ -42,8 +48,6 @@ def handle_args():
     if (not os.path.isfile(options.credentials)) and (options.login is None or options.password is None):
         print("Must provide cookes file or login/password")
         sys.exit(1)
-
-    game_id = options.gameid
 
     return options
 
@@ -76,25 +80,31 @@ def load_cookies(login, password, credentials):
 def get_universe():
     global universe
 
-    response = requests.post('https://np.ironhelmet.com/trequest/order',
-                             data={'type':'order',
-                                   'order':'full_universe_report',
-                                   'version':'',
-                                   'game_number':game_id},
-                             cookies=cookies)
-    # print("Universe: %s" % json.dumps(universe))
+    universe = None
+    if options.universe:
+        with open(UNIVERSE_FILE, "r") as fd:
+            universe = json.load(fd)
+            print(f"get_universe(): read universe from {UNIVERSE_FILE}")
 
-    universe = response.json()
-    if response.status_code != requests.codes.ok:
-        print("get_universe(): request failed, code %d" % response.status_code)
-        print("  data: %s" % response.text)
-        sys.exit(1)
+    if not universe:
+        print("get_universe(): querying for universe")
+        response = requests.post('https://np.ironhelmet.com/trequest/order',
+                                 data={'type':'order',
+                                       'order':'full_universe_report',
+                                       'version':'',
+                                       'game_number':options.gameid},
+                                 cookies=cookies)
+        universe = response.json()
+        if response.status_code != requests.codes.ok:
+            print("get_universe(): request failed, code %d" % response.status_code)
+            print("  data: %s" % response.text)
+            sys.exit(1)
 
     if 'player_uid' not in universe['report']:
         print("get_universe(): invalid universe: %s" % (json.dumps(universe)))
         sys.exit()
 
-    with open("universe.json", "w") as f:
+    with open(UNIVERSE_FILE, "w") as f:
         f.write(json.dumps(universe))
     return universe
 
@@ -164,7 +174,7 @@ class Star(object):
         data = {'type': 'batched_orders',
                 'order': 'upgrade_%s,%d,%d' % (resource, self.id, amount),
                 'version': '',
-                'game_number': '%d' % game_id}
+                'game_number': '%d' % options.gameid}
         print("Star.upgrade(): command: %s" % data)
 
         result = requests.post(
@@ -251,6 +261,76 @@ class Stars(object):
 class Fleet(object):
     pass
 
+
+class Player(dict):
+    SELF = 0
+    FRIEND = 1
+    NEUTRAL = 2
+    FOE = 3
+
+    def __init__(self, player_info):
+        dict.__init__(self,
+                      name=player_info['alias'],
+                      id=int(player_info['uid']),
+                      state=Player.NEUTRAL)
+
+    def relationship(self):
+        if self['state'] == Player.SELF:
+            return 'self'
+        if self['state'] == Player.FRIEND:
+            return 'friend'
+        if self['state'] == Player.NEUTRAL:
+            return 'neutral'
+        if self['state'] == Player.FOE:
+            return 'foe'
+
+    def __str__(self):
+        return f"{self['name']:>20}: id:{self['id']:<3} state:{self.relationship()}"
+
+
+class Players(dict):
+    def __init__(self, players):
+        dict.__init__(self, players=players)
+
+    def update_from_file(self):
+        with open(PLAYERS_FILE, "r") as fd:
+            players = json.load(fd)
+            for p in players['players']:
+                found = self.by_name(p['name'])
+                found['state'] = p['state']
+
+    @staticmethod
+    def from_universe(universe):
+        """Return an array of players from the universe"""
+        players = []
+        for player_id, player in universe['report']['players'].items():
+            p = Player(player)
+            if p['id'] == int(universe['report']['player_uid']):
+                p['state'] = Player.SELF
+            players.append(p)
+        p = Players(sorted(players, key=lambda i: i['id']))
+
+        if os.path.isfile(PLAYERS_FILE):
+            p.update_from_file()
+
+        p.to_file()
+
+        return p
+
+    def to_file(self):
+        with open(PLAYERS_FILE, "w") as fd:
+            json.dump(self, fd, indent=2, sort_keys=True)
+
+    def by_name(self, name):
+        return next(player for player in self['players'] if player['name'] == name)
+
+    def by_id(self, id):
+        return next(player for player in self['players'] if player['id'] == id)
+
+    def __str__(self):
+        return '\n'.join([str(s) for s in self['players']])
+
+
 def main():
 
     options = handle_args()
@@ -270,7 +350,8 @@ def main():
 
     player_stars.print_upgrades()
 
-    print(f'distance: {stars.by_name("Alnilam").distance_to(stars.by_name("Septen"))}')
+    players = Players.from_universe(universe)
+    print(f"Players:\n{players}")
 
     if options.upgrade_economy:
         player_stars.upgrade_cheapest(Star.ECONOMY, options.execute)
@@ -282,7 +363,7 @@ def main():
 
 def console_init():
     load_cookies(None, None, "creds.np")
-    get_universe(cookies, game_id)
+    get_universe()
     return cookies, universe
 
 
