@@ -193,12 +193,16 @@ class Stars(object):
 
     def print_upgrades(self):
         print("Upgrade Costs:")
+
+        cheapest_e = self.find_cheapest(Star.ECONOMY)
+        cheapest_i = self.find_cheapest(Star.INDUSTRY)
+        cheapest_s = self.find_cheapest(Star.SCIENCE)
         for star in sorted(self.stars, key=lambda i: i.name):
-            print("%20s: id:%3d e:%5d i:%5d s:%5d" % (
+            print("%24s: id:%3d e:%5d%1s i:%5d%1s s:%5d%1s" % (
                 star.name, star.id,
-                star.costs[Star.ECONOMY],
-                star.costs[Star.INDUSTRY],
-                star.costs[Star.SCIENCE]))
+                star.costs[Star.ECONOMY], "*" if (star == cheapest_e) else " ",
+                star.costs[Star.INDUSTRY], "*" if (star == cheapest_i) else " ",
+                star.costs[Star.SCIENCE], "*" if (star == cheapest_s) else " "))
 
     def by_name(self, name):
         return next(star for star in self.stars if star.name == name)
@@ -206,8 +210,11 @@ class Stars(object):
     def by_id(self, id):
         return next(star for star in self.stars if star.id == id)
 
+    def find_cheapest(self, resource):
+        return sorted(self.stars, key=lambda i: i.costs[resource])[0]
+
     def upgrade_cheapest(self, resource, execute=False):
-        star = sorted(self.stars, key=lambda i: i.costs[resource])[0]
+        star = self.find_cheapest(resource)
         print("Cheapest %s: %s - %d" % (resource, star.name, star.costs[resource]))
 
         if execute:
