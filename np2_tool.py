@@ -62,8 +62,6 @@ def load_cookies(login, password, credentials):
                                 data={'type': 'login',
                                       'alias': login,
                                       'password': password}).cookies
-        # print("Cookies: %s" % cookies)
-
         if credentials:
             with open(credentials, "wb") as creds:
                 pickle.dump(cookies, creds)
@@ -81,7 +79,7 @@ def get_universe():
     global universe
 
     universe = None
-    if options.universe:
+    if options.universe and os.path.isfile(UNIVERSE_FILE):
         with open(UNIVERSE_FILE, "r") as fd:
             universe = json.load(fd)
             print(f"get_universe(): read universe from {UNIVERSE_FILE}")
@@ -131,20 +129,21 @@ class Star(object):
     INDUSTRY = 'industry'
     SCIENCE = 'science'
 
-    def __init__(self, star_info):
-        self.visible = int(star_info['v'])
-        self.name = star_info['n']
-        self.id = int(star_info['uid'])
-        self.player_id = int(star_info['puid'])
-        self.loc_x = float(star_info['x'])
-        self.loc_y = float(star_info['y'])
+    def __init__(self, info):
+        self.visible = int(info['v'])
+        self.name = info['n']
+        self.id = int(info['uid'])
+        self.player_id = int(info['puid'])
+        self.loc_x = float(info['x'])
+        self.loc_y = float(info['y'])
 
         if self.visible:
-            self.ships = int(star_info['st'])
-            self.economy = int(star_info['e'])
-            self.industry = int(star_info['i'])
-            self.science = int(star_info['s'])
-            self.resources = int(star_info['r'])
+            self.ships = int(info['st'])
+            self.economy = int(info['e'])
+            self.industry = int(info['i'])
+            self.science = int(info['s'])
+            self.resources = int(info['r'])
+            self.gate = int(info['ga'])
 
             e = self.economy + 1
             i = self.industry + 1
@@ -160,13 +159,25 @@ class Star(object):
         else:
             self.ships = None
 
-    def distance_to(self, star):
+        if "wh" in info:
+            self.wh = int(info['wh'])
+        else:
+            self.wh = None
+
+    # TODO: This should probably take tech range levels into account?
+    def distance_to(self, target):
         distance = math.sqrt(
-            (self.loc_x - star.loc_x) ** 2 +
-            (self.loc_y - star.loc_y) ** 2)
+            (self.loc_x - target.loc_x) ** 2 +
+            (self.loc_y - target.loc_y) ** 2)
+
+        if isinstance(target, Star) and target.wh and target.wh == self.id:
+            hours = 24
+        else:
+            hours = int(math.ceil(distance * LIGHT_YEAR_SCALE * LIGHT_YEAR_TIME))
+
         return {
             'distance': distance * LIGHT_YEAR_SCALE,
-            'time': int(math.ceil(distance * LIGHT_YEAR_SCALE * LIGHT_YEAR_TIME))
+            'time': hours
         }
 
     def upgrade(self, resource):
@@ -182,21 +193,45 @@ class Star(object):
             data=data,
             cookies=cookies)
         print('Star.upgrade(): status=%d text=%s' % (
-        result.status_code, result.text))
+            result.status_code, result.text))
+
+    def ships_in_range(self, stars, fleets, players, hours):
+        counts = {
+            Player.SELF: 0,
+            Player.FRIEND: 0,
+            Player.NEUTRAL: 0,
+            Player.FOE:0
+        }
+        for star in stars:
+            if star.visible:
+                distance = self.distance_to(star)
+                if distance['time'] <= hours:
+                    player = players.by_id(star.player_id)
+                    # print(f"{self.name}: star  {star.name:>24}={distance['time']:3} ships={star.ships:5} player={player['name']}")
+                    counts[player['state']] += star.ships
+        for fleet in fleets:
+            distance = self.distance_to(fleet)
+            if distance['time'] <= hours:
+                player = players.by_id(fleet.player_id)
+                # print(f"{self.name}: fleet {fleet.name:>24}={distance['time']:3} ships={fleet.ships:5} player={player['name']}")
+                counts[player['state']] += fleet.ships
+
+        return counts
 
 
 class Stars(object):
-
     def __init__(self, stars):
         self.stars = stars
 
     @staticmethod
     def from_universe(universe):
         """Return an array of stars from the universe"""
-        stars = []
+        global stars
+        star_array = []
         for star_id, star in universe['report']['stars'].items():
-            stars.append(Star(star))
-        return Stars(sorted(stars, key=lambda i: i.id))
+            star_array.append(Star(star))
+        stars = Stars(sorted(star_array, key=lambda i: i.id))
+        return stars
 
     def stars_for_player(self, stars, player_id):
         return Stars([star for star in self.stars if star.player_id == player_id])
@@ -230,36 +265,80 @@ class Stars(object):
         if execute:
             star.upgrade(resource)
 
+    def ships_in_range(self):
+        result = {}
+        for hours in range(1, 25):
+            for star in self.stars:
+                ships = star.ships_in_range(stars, fleets, players, hours)
+                if star.name not in result:
+                    result[star.name] = {}
+                result[star.name][hours] = ships
+        return result
 
-  # "50": {
-  #   "uid": 50,
-  #   "sp": 0.041666666666666664,
-  #   "l": 0,
-  #   "o": [
-  #     [
-  #       0,
-  #       294,
-  #       1,
-  #       0
-  #     ],
-  #     [
-  #       0,
-  #       82,
-  #       1,
-  #       0
-  #     ]
-  #   ],
-  #   "n": "Peacock I",
-  #   "puid": 5,
-  #   "exp": 140,
-  #   "y": "4.96296426",
-  #   "x": "0.71448864",
-  #   "st": 3372,
-  #   "lx": "0.72189505",
-  #   "ly": "4.92196113"
-  # },
+    def __iter__(self):
+        return iter(self.stars)
+
+
+# "50": {
+#   "uid": 50,
+#   "sp": 0.041666666666666664,
+#   "l": 0,
+#   "o": [
+#     [
+#       0,
+#       294,
+#       1,
+#       0
+#     ],
+#     [
+#       0,
+#       82,
+#       1,
+#       0
+#     ]
+#   ],
+#   "n": "Peacock I",
+#   "puid": 5,
+#   "exp": 140,
+#   "y": "4.96296426",
+#   "x": "0.71448864",
+#   "st": 3372,
+#   "lx": "0.72189505",
+#   "ly": "4.92196113"
+# },
 class Fleet(object):
-    pass
+    def __init__(self, info):
+        self.name = info['n']
+        self.id = int(info['uid'])
+        self.player_id = int(info['puid'])
+        self.loc_x = float(info['lx'])
+        self.loc_y = float(info['ly'])
+        self.ships = int(info['st'])
+
+    def __str__(self):
+        return f"{self.name:>20}: id:{self.id:<3} ships:{self.ships:<5} player:{self.player_id}"
+
+
+class Fleets(object):
+    def __init__(self, fleets):
+        self.fleets = fleets
+
+    @staticmethod
+    def from_universe(universe):
+        """Return an array of fleets from the universe"""
+        global fleets
+
+        fleet_array = []
+        for fleet_id, fleet in universe['report']['fleets'].items():
+            fleet_array.append(Fleet(fleet))
+        fleets = Fleets(sorted(fleet_array, key=lambda i: i.id))
+        return fleets
+
+    def __str__(self):
+        return '\n'.join([str(s) for s in self.fleets])
+
+    def __iter__(self):
+        return iter(self.fleets)
 
 
 class Player(dict):
@@ -302,20 +381,22 @@ class Players(dict):
     @staticmethod
     def from_universe(universe):
         """Return an array of players from the universe"""
-        players = []
+        global players
+
+        player_array = []
         for player_id, player in universe['report']['players'].items():
             p = Player(player)
             if p['id'] == int(universe['report']['player_uid']):
                 p['state'] = Player.SELF
-            players.append(p)
-        p = Players(sorted(players, key=lambda i: i['id']))
+            player_array.append(p)
+        players = Players(sorted(player_array, key=lambda i: i['id']))
 
         if os.path.isfile(PLAYERS_FILE):
-            p.update_from_file()
+            players.update_from_file()
 
-        p.to_file()
+        players.to_file()
 
-        return p
+        return players
 
     def to_file(self):
         with open(PLAYERS_FILE, "w") as fd:
@@ -343,15 +424,31 @@ def main():
     print(f"Player ID: {player_id}")
     print(f"Cash: {universe['report']['players'][str(player_id)]['cash']}")
 
-    stars = Stars.from_universe(universe)
+    Stars.from_universe(universe)
     player_stars = stars.stars_for_player(stars, player_id)
 
     print(f"Player {player_name} : {len(player_stars.stars)} stars")
 
     player_stars.print_upgrades()
 
-    players = Players.from_universe(universe)
+    Players.from_universe(universe)
     print(f"Players:\n{players}")
+
+    Fleets.from_universe(universe)
+    print(f"Fleets:\n{fleets}")
+
+    ranges = player_stars.ships_in_range()
+    hours = ""
+    for star, data in ranges.items():
+        txt = f"{star:>24}: "
+        for hour, ships in data.items():
+            txt += f"{ships[Player.FOE]:<5} "
+            if hours is not None:
+                hours += f"{hour:<5} "
+        if hours is not None:
+            print(f"{'Ships in range - hours':>24}: {hours}")
+            hours = None
+        print(txt)
 
     if options.upgrade_economy:
         player_stars.upgrade_cheapest(Star.ECONOMY, options.execute)
@@ -364,6 +461,9 @@ def main():
 def console_init():
     load_cookies(None, None, "creds.np")
     get_universe()
+    Stars.from_universe(universe)
+    Players.from_universe(universe)
+    Fleets.from_universe(universe)
     return cookies, universe
 
 

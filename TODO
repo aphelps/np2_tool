@@ -3,7 +3,7 @@ X Parse players
 X Save basic info on players to file
 X Allow players to be assigned as friend or foe
 
-* Calculate ships within distance of a star
+X Calculate ships within distance of a star
 
-* Parse fleets
-* Add fleets to calculation
+X Parse fleets
+X Add fleets to calculation
