@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 
 import argparse
 import json
@@ -221,6 +221,36 @@ class Stars(object):
             star.upgrade(resource)
 
 
+  # "50": {
+  #   "uid": 50,
+  #   "sp": 0.041666666666666664,
+  #   "l": 0,
+  #   "o": [
+  #     [
+  #       0,
+  #       294,
+  #       1,
+  #       0
+  #     ],
+  #     [
+  #       0,
+  #       82,
+  #       1,
+  #       0
+  #     ]
+  #   ],
+  #   "n": "Peacock I",
+  #   "puid": 5,
+  #   "exp": 140,
+  #   "y": "4.96296426",
+  #   "x": "0.71448864",
+  #   "st": 3372,
+  #   "lx": "0.72189505",
+  #   "ly": "4.92196113"
+  # },
+class Fleet(object):
+    pass
+
 def main():
 
     options = handle_args()
@@ -230,17 +260,17 @@ def main():
 
     player_id = universe['report']['player_uid']
     player_name = universe['report']['players'][str(player_id)]['alias']
-    print("Player ID: %d" % player_id)
-    print("Cash: %d" % universe['report']['players'][str(player_id)]['cash'])
+    print(f"Player ID: {player_id}")
+    print(f"Cash: {universe['report']['players'][str(player_id)]['cash']}")
 
     stars = Stars.from_universe(universe)
     player_stars = stars.stars_for_player(stars, player_id)
 
-    print("Player %s: %d stars" % (player_name, len(player_stars.stars)))
+    print(f"Player {player_name} : {len(player_stars.stars)} stars")
 
     player_stars.print_upgrades()
 
-    print('distance: %s' % stars.by_name("Alnilam").distance_to(stars.by_name("Septen")))
+    print(f'distance: {stars.by_name("Alnilam").distance_to(stars.by_name("Septen"))}')
 
     if options.upgrade_economy:
         player_stars.upgrade_cheapest(Star.ECONOMY, options.execute)

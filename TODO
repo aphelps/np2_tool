@@ -1,0 +1,9 @@
+TODO:
+* Parse players
+* Save basic info on players to file
+* Allow players to be assigned as friend or foe
+
+* Calculate ships within distance of a star
+
+* Parse fleets
+* Add fleets to calculation
