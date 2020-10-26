@@ -7,3 +7,30 @@ X Calculate ships within distance of a star
 
 X Parse fleets
 X Add fleets to calculation
+
+
+
+##################################################
+
+NP API
+
+* New ship:
+  - URL: https://np.ironhelmet.com/prequest/order
+  - data: type=order&order=new_fleet%2C55%2C1532&version=&game_number=5380395345117184
+
+* Set path
+  * 4 stops, return to start, all pickup
+    - data: type=order&order=add_fleet_orders%2C241%2C0_0_0_0%2C12_270_57_55%2C1_1_1_1%2C0_0_0_0%2C0&version=&game_number=5380395345117184
+  * Switch second stop to drop:
+    - data: type=order&order=add_fleet_orders%2C241%2C0_0_0_0%2C12_270_57_55%2C1_2_1_1%2C0_0_0_0%2C0&version=&game_number=5380395345117184
+  * 1 stop, set to "collect all"
+    - data: add_fleet_orders,5,0,  49,   1,  0,  0
+  * 2nd stop, set to "collect all"
+    - data: add_fleet_orders,5,0_0,49_29,1_1,0_0,0
+  * 2nd stop, set to "collect all but 5"
+    - data: add_fleet_orders,5,0_0,49_29,1_5,0_5,0
+  Format:
+    add_fleet_orders, <fleet ID>, ?[_? ...], <dest ID>[_<dest ID> ...], <action>[_<action> ...], <action arg>[_<action arg> ...], ?
+
+* Enable looping:
+  - data: type=order&order=loop_fleet_orders%2C241%2C1&version=&game_number=5380395345117184

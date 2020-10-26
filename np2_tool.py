@@ -37,6 +37,7 @@ def handle_args():
     parser.add_argument("-v", "--verbose", action="store_true")
 
     parser.add_argument("-U", "--universe", action="store_true", help="Attempt to load universe.json before querying for universe")
+    parser.add_argument("-R", "--risk", action="store_true")
 
     parser.add_argument("-E", "--upgrade_economy", action="store_true")
     parser.add_argument("-I", "--upgrade_industry", action="store_true")
@@ -207,13 +208,11 @@ class Star(object):
                 distance = self.distance_to(star)
                 if distance['time'] <= hours:
                     player = players.by_id(star.player_id)
-                    # print(f"{self.name}: star  {star.name:>24}={distance['time']:3} ships={star.ships:5} player={player['name']}")
                     counts[player['state']] += star.ships
         for fleet in fleets:
             distance = self.distance_to(fleet)
             if distance['time'] <= hours:
                 player = players.by_id(fleet.player_id)
-                # print(f"{self.name}: fleet {fleet.name:>24}={distance['time']:3} ships={fleet.ships:5} player={player['name']}")
                 counts[player['state']] += fleet.ships
 
         return counts
@@ -442,7 +441,13 @@ def main():
     for star, data in ranges.items():
         txt = f"{star:>24}: "
         for hour, ships in data.items():
-            txt += f"{ships[Player.FOE]:<5} "
+            risk = ships[Player.FOE] - ships[Player.SELF]
+            if risk < 0:
+                risk = 0
+            if options.risk:
+                txt += f"{risk:<5} "
+            else:
+                txt += f"{ships[Player.FOE]:<5} "
             if hours is not None:
                 hours += f"{hour:<5} "
         if hours is not None:
