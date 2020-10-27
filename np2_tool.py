@@ -19,17 +19,16 @@ from multiprocessing import Process
 MONITOR_PERIOD = 15 * 60  # In seconds
 MAX_DELAY = 60
 
-UPGRADE_RESERVE_DEFAULT = 1000  # Amount of cash to reserve from automatic upgrades
+# Amount of cash to reserve from automatic upgrades
+UPGRADE_RESERVE_DEFAULT = 1000
 
 
 def handle_args():
-    global options
-
     parser = argparse.ArgumentParser()
 
     parser.add_argument("-l", "--login", help="Login ID")
     parser.add_argument("-p", "--password", help="password")
-    parser.add_argument("-C", "--credentials", default="creds.np", help="Cookies output file [default: %(default)s]")
+    parser.add_argument("-C", "--credentials", default=State.CREDENTIALS, help="Cookies output file [default: %(default)s]")
     parser.add_argument("-g", "--gameid", type=int, default=5380395345117184, help="Game ID")
 
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -102,7 +101,7 @@ def monitor_process(options, state):
 
 
 def main():
-    handle_args()
+    options = handle_args()
 
     state = State.new(options.login, options.password, options.credentials,
                       options.gameid)
@@ -163,7 +162,7 @@ def console_init():
     console.
     :return: (cookies, universe)
     """
-    state = State.new(None, None, "creds.np", None)
+    state = State.new(None, None, State.CREDENTIALS, None)
     universe = Universe.get_universe(True, state)
     return state, universe
 

@@ -3,6 +3,7 @@ import requests
 
 
 class State(dict):
+    CREDENTIALS = "creds.np"
 
     def __init__(self, game_id, cookies):
         dict.__init__(self,
