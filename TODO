@@ -8,6 +8,8 @@ X Calculate ships within distance of a star
 X Parse fleets
 X Add fleets to calculation
 
+X Move classes into package
+X Create "Universe" class
 
 
 ##################################################
