@@ -18,10 +18,10 @@ from multiprocessing import Manager, Process
 UNIVERSE_FILE = "universe.json"
 PLAYERS_FILE = "players.json"
 
-MONITOR_PERIOD = 5 * 60  # In seconds
+MONITOR_PERIOD = 15 * 60  # In seconds
 MAX_DELAY = 60
 
-UPGRADE_RESERVE = 850  # Amount of cash to reserve from automatic upgrades
+UPGRADE_RESERVE_DEFAULT = 1000  # Amount of cash to reserve from automatic upgrades
 
 ################################################################################
 # Constants
@@ -58,6 +58,8 @@ def handle_args():
     parser.add_argument("--execute", action="store_true")
 
     parser.add_argument("-M", "--monitor", action="store_true")
+    parser.add_argument("-r", "--reserve", type=int, default=UPGRADE_RESERVE_DEFAULT,
+                        help="Cash to hold back from automatic updates [default: %(default)d]")
 
     options = parser.parse_args()
 
@@ -492,15 +494,24 @@ def monitor_process(opt, creds):
     while True:
         start_time = time.time()
         get_universe()
+
+        minutes_to_tick = universe["report"]['tick_rate'] - \
+                          universe["report"]['tick_fragment'] * universe["report"]['tick_rate']
+        tick_time = time.time() + minutes_to_tick * 60
+
         player_id = universe['report']['player_uid']
+        player_name = universe['report']['players'][str(player_id)]['alias']
         cash = universe['report']['players'][str(player_id)]['cash']
         Stars.from_universe(universe)
         player_stars = stars.stars_for_player(stars, player_id)
 
+        print(f"\n{'*' * 60}")
+        print(f"Player {player_name}/{player_id}: ${cash}, {minutes_to_tick:.0f}:{(minutes_to_tick % 1) * 60:.0f} to tick")
+
         # Upgrade all cheapest
         while cash > 0:
             # Determine how much if available to spend after reserved amount
-            available = cash - UPGRADE_RESERVE if (cash - UPGRADE_RESERVE > 0) else 0
+            available = cash - options.reserve if (cash - options.reserve > 0) else 0
             print(f"Player has ${cash} remaining, ${available} available")
 
             resource, star, cost = player_stars.upgrade_cheapest(None,
@@ -514,9 +525,10 @@ def monitor_process(opt, creds):
         while True:
             now = time.time()
             delay = MONITOR_PERIOD - (now - start_time)
+            delay = min(delay, (tick_time + 15 - now))
             if delay < 0:
                 break
-            print(f"Sleeping for {delay:.0f} seconds")
+            print(f"Sleeping for {delay:.0f}s, {tick_time - now:.0f}s to tick")
             time.sleep(min(delay, MAX_DELAY))
 
     print("Exiting monitor process")
